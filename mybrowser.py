@@ -54,6 +54,31 @@ def GetCodeRefsFrom(ea):
 
     return ret
 
+def GetDataXrefString(ea):
+    name = idc.GetFunctionName(ea)
+    ea = idc.LocByName(name)
+
+    f_start = ea
+    f_end = idc.GetFunctionAttr(ea, idc.FUNCATTR_END)
+
+    ret = []
+    for chunk in idautils.Chunks(ea):
+        astart = chunk[0]
+        aend = chunk[1]
+        for head in idautils.Heads(astart, aend):
+            # If the element is an instruction
+            if idc.isCode(idc.GetFlags(head)):
+                refs = list(idautils.DataRefsFrom(head))
+                for ref in refs:
+                    s = idc.GetString(ref, -1, idc.ASCSTR_C)
+                    if s:
+                        ret.append(repr(s))
+
+    if len(ret) > 0:
+        return "\n\n" + "\n".join(ret)
+    else:
+        return ""
+
 def GetName(ea, resolve_imports=True):
     name = idc.GetFunctionName(ea)
     if not name and resolve_imports:
@@ -277,6 +302,7 @@ class FunctionsBrowser(GraphViewer):
         self.is_new_father = False
         self.old_father = False
         self.show_runtime_functions = True
+        self.show_string = True
 
     def addChildNodes(self, father):
         self.addRequiredNodes(father, 0)
@@ -318,6 +344,7 @@ class FunctionsBrowser(GraphViewer):
                 
                 name = GetName(ea, True)
                 if name:
+                    name += GetDataXrefString(ea)
                     self.nodes[ea] = self.AddNode((ea, name))
                     
                     if level < self.max_level:
@@ -555,7 +582,7 @@ def ShowStringsGraph(l):
     g = StringsBrowser("Strings browser", l)
     g.Show()
 
-def ShowFunctionsBrowser(mea=None, show_runtime=False):
+def ShowFunctionsBrowser(mea=None, show_runtime=False, show_string=True):
     try:
         if mea is None:
             ea = idc.ScreenEA()
@@ -569,6 +596,7 @@ def ShowFunctionsBrowser(mea=None, show_runtime=False):
         result = list(idautils.CodeRefsFrom(ea, idc.BADADDR))
         g = FunctionsBrowser("Code Refs Browser %s" % idc.GetFunctionName(ea), ea, result)
         g.max_level = num
+        g.show_string = True
         g.show_runtime_functions = show_runtime
         g.Show()
     except:
@@ -650,7 +678,8 @@ def SearchCodePathDialog(ret_only=False, extended=False):
 def main():
     #ShowFunctionsBrowser(show_runtime=True)
     try:
-        SearchCodePathDialog()
+        #SearchCodePathDialog()
+        ShowFunctionsBrowser(show_string=True)
     except:
         print "***Error:", sys.exc_info()[1]
 

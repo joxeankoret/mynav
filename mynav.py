@@ -30,11 +30,11 @@ import sqlite3
 from Tkinter import *
 
 from idc import (GetBptQty, GetBptEA, GetRegValue, FindText, NextAddr, GetDisasm, GetMnem,
-                 GetFunctionName, MakeFunction, ItemSize, GetBptAttr, AskFile)
+                 GetFunctionName, MakeFunction, ItemSize, GetBptAttr, AskFile, StopDebugger)
 from idaapi import (GraphViewer, dbg_can_query, askyn_c, asklong, FlowChart, get_func, info,
-                   dbg_get_registers, get_dbg_byte, get_idp_name, DBG_Hooks, run_requests,
+                   get_dbg_byte, get_idp_name, DBG_Hooks, run_requests,
                    request_run_to)
-
+from idautils import GetRegisterList
 import mybrowser
 import myexport
 
@@ -43,6 +43,8 @@ VERSION = 0x01020200
 
 COLORS = [0xfff000, 0x95AFCD, 0x4FFF4F, 0xc0ffff, 0xffffc0, 0xc0cfff, 0xc0ffcf, 0x95AFFD]
 
+reload(sys)
+sys.setdefaultencoding('utf8')
 def mynav_print(msg):
     print "[%s] %s" % (APPLICATION_NAME, msg)
 
@@ -107,6 +109,11 @@ class CMyNav:
         self.save_cpu = False
         self.endpoints = []
         self.temporary_breakpoints = []
+        
+        self.dbg_path = ""
+        self.dbg_arguments = ""
+        self.dbg_directory = ""
+        self.on_exception = None
         
         self._loadDatabase()
 
@@ -244,7 +251,6 @@ class CMyNav:
                                       values (?, ?, ?, ?)"""
             cur.execute(sql, (id, i, event[0], event[1]))
             m_id = cur.lastrowid
-            #print "ID", id, "m_id", m_id
             
             if self.save_cpu:
                 j = 0
@@ -261,6 +267,8 @@ class CMyNav:
             root.destroy()
         except:
             pass
+
+        return id
 
     def readSetting(self, setting):
         """ Read some configuration setting """
@@ -411,7 +419,7 @@ class CMyNav:
             mynav_print("Data entry point 0x%08x added" % ea)
 
     def saveCurrentSession(self, name):
-        self.saveSession(name, self.current_session, self.current_session_cpu)
+        return self.saveSession(name, self.current_session, self.current_session_cpu)
 
     def showTargetPoints(self):
         tps = self.getTargetPointsList()
@@ -667,32 +675,35 @@ class CMyNav:
     def getRegisters(self):
         l = []
         
-        for x in idaapi.dbg_get_registers():
-            name = x[0]
-            try:
-                addr = idc.GetRegValue(name)
-            except:
-                break
-            
-            bytes = None
-            """try:
-                if get_dbg_byte(addr) != 0xFF:
-                    for i in range(16):
-                        bytes += "%02x " % get_byte(addr+i)
-                    bytes = bytes.strip(" ")
-            except:
-                bytes = None"""
-            
-            try:
-                strdata = GetString(int(addr), -1, ASCSTR_C)
-            except:
+        try:
+            for x in idaapi.dbg_get_registers():
+                name = x[0]
                 try:
-                    strdata = "Unicode: " + GetString(int(addr), -1, ASCSTR_UNICODE)
+                    addr = idc.GetRegValue(name)
                 except:
-                    strdata = None
-            
-            l.append([name, addr, bytes, strdata])
-        
+                    break
+                
+                bytes = None
+                """try:
+                    if get_dbg_byte(addr) != 0xFF:
+                        for i in range(16):
+                            bytes += "%02x " % get_byte(addr+i)
+                        bytes = bytes.strip(" ")
+                except:
+                    bytes = None"""
+                
+                try:
+                    strdata = GetString(int(addr), -1, ASCSTR_C)
+                except:
+                    try:
+                        strdata = "Unicode: " + GetString(int(addr), -1, ASCSTR_UNICODE)
+                    except:
+                        strdata = None
+                
+                l.append([name, addr, bytes, strdata])
+        except:
+            print "getRegisters()", sys.exc_info()[1]
+
         return l
 
     def recordBreakpoint(self):
@@ -702,10 +713,8 @@ class CMyNav:
             t2 = time.time()
             self.current_session.append([pc, t2])
             if self.save_cpu:
-                print "Saving CPU"
                 self.current_session_cpu.append(self.getRegisters())
-            else:
-                print "Not saving :()"
+            
             self._debug("Hit %s:%08x" % (GetFunctionName(pc), pc))
             if self.step_mode:
                 SetColor(pc, 1, self.current_color)
@@ -718,23 +727,18 @@ class CMyNav:
                 mynav_print("Session's endpoint reached")
             """
         except:
-            print "record", sys.exc_info()[1]
+            print "recordBreakpoint:", sys.exc_info()[1]
 
-    def isDebuggerSelected(self):
-        """ Is any debugger selected? """
-        try:
-            ret = dbg_is_loaded()
-            return ret
-        except:
-            return dbg_can_query()
+    def stop(self):
+        StopDebugger()
 
     def startRecording(self, all=False):
         """ Start recording breakpoint hits """
-        if not self.isDebuggerSelected():
+        """if not dbg_can_query():
             info("Select a debugger first!")
-            return False
+            return False"""
         
-        StartDebugger("", "", "")
+        StartDebugger(self.dbg_path, self.dbg_arguments, self.dbg_directory)
         
         t = time.time()
         if self.timeout != 0:
@@ -744,12 +748,11 @@ class CMyNav:
         last = -1
         
         while 1:
+            #WFNE_CONT|WFNE_SUSP
             code = GetDebuggerEvent(WFNE_ANY|WFNE_CONT|WFNE_SUSP, mtimeout)
             
             if code == BREAKPOINT or code == STEP and last != BREAKPOINT:
-                pc = self.getPC()
-                #print "CODE %d at 0x%08x" % (code, pc)
-                #pc = GetEventEa()
+                pc = GetEventEa()
                 t2 = time.time()
                 self.current_session.append([pc, t2])
                 if self.save_cpu:
@@ -767,7 +770,11 @@ class CMyNav:
                 #print "INFORMATION"
                 pass
             elif GetProcessState() != DSTATE_RUN:
-                break
+                if GetEventExceptionCode() != 0 and self.on_exception is not None:
+                    self.on_exception(GetEventEa(), GetEventExceptionCode())
+            elif code in [EXCEPTION, 0x40]:
+                #print "**EXCEPTION", hex(GetEventEa()), hex(GetEventExceptionCode())
+                self.on_exception(GetEventEa(), GetEventExceptionCode())
             elif code not in [DBG_TIMEOUT, PROCESS_START, PROCESS_EXIT, THREAD_START,
                               THREAD_EXIT, LIBRARY_LOAD, LIBRARY_UNLOAD, PROCESS_ATTACH,
                               PROCESS_DETACH, STEP]:
@@ -799,10 +806,13 @@ class CMyNav:
             pc = GetEventEa()
             return pc
         except:
-            print "GETPC", sys.exc_info()[1]
+            print "getPc", sys.exc_info()[1]
 
-    def start(self, do_show=True):
-        name = AskStr(self.default_name, "Enter new session name")
+    def start(self, do_show=True, session_name=None):
+        if session_name is None:
+            name = AskStr(self.default_name, "Enter new session name")
+        else:
+            name = session_name
         
         if name:
             if GetBptEA(0) == BADADDR:
@@ -835,8 +845,9 @@ class CMyNav:
                 mynav_print("Cancelled by user")
             
             mynav_print("Saving current session ...")
+            id = None
             if len(self.current_session) > 0:
-                self.saveCurrentSession(name)
+                id = self.saveCurrentSession(name)
                 
                 if not self.step_mode and do_show:
                     if len(self.current_session) > 100:
@@ -851,6 +862,7 @@ class CMyNav:
                 mynav_print("No data to save")
             
             mynav_print("OK, all done")
+            return id
 
     def newSession(self):
         self.step_mode = False
@@ -972,10 +984,10 @@ class CMyNav:
 
     def doNothing(self):
         pass
-    
+
     def showBrowser(self):
         mybrowser.ShowFunctionsBrowser()
-    
+
     def showBrowser2(self):
         mybrowser.ShowFunctionsBrowser(show_runtime=True)
 
@@ -1019,7 +1031,7 @@ class CMyNav:
             self.addChildsBpt(ref, badd)
 
     def selectCodePaths(self):
-        nodes = mybrowser.mybrowser.SearchCodePathDialog(ret_only=True)
+        nodes = mybrowser.SearchCodePathDialog(ret_only=True)
         if nodes is not None:
             if len(nodes) > 0:
                 for node in nodes:
@@ -1130,13 +1142,7 @@ class CMyNav:
         while ea != BADADDR and ea < end_ea:
             tmp = ea
             val = min(1000, end_ea - ea)
-            ea1 = FindText(tmp, SEARCH_DOWN, val, 0, "  endp")
-            if ea1 is None:
-                ea1 = FindText(tmp, SEARCH_DOWN, val, 0, "align ")
-            if ea1 is None:
-                return True
-            
-            ea = ea1 #min(ea1, ea2)
+            ea = FindText(tmp, SEARCH_REGEX|SEARCH_DOWN, val, 0, "# End of|  endp|align ")
             
             if time.time() - t > 10:
                 val = askyn_c(1, "The process is taking too long. Do you want to continue?")
@@ -1371,6 +1377,9 @@ class CMyNav:
             g["mybrowser"] = mybrowser
             g["myexport"] = myexport
             execfile(res, g)
+    
+    def mynav_print(self, msg):
+        mynav_print(msg)
 
     def registerMenus(self):
         #idaapi.add_menu_item("Edit/Plugins/", "MyNav: Deselect extended code paths between 2 functions", None, 0, self.deselectExtendedCodePaths, None)
