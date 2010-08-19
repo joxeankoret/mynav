@@ -1142,7 +1142,7 @@ class CMyNav:
         while ea != BADADDR and ea < end_ea:
             tmp = ea
             val = min(1000, end_ea - ea)
-            ea = FindText(tmp, SEARCH_REGEX|SEARCH_DOWN, val, 0, "# End of|  endp|align ")
+            ea = FindText(tmp, SEARCH_REGEX|SEARCH_DOWN, val, 0, "# End of| endp|align |END OF FUNCTION")
             
             if time.time() - t > 10:
                 val = askyn_c(1, "The process is taking too long. Do you want to continue?")
@@ -1158,7 +1158,8 @@ class CMyNav:
                 if ea != BADADDR and ea < end_ea:
                     txt = GetDisasm(ea)
                     
-                    if txt.startswith("align ") or txt.startswith("db "):
+                    if txt.startswith("align ") or txt.startswith("db ") or txt.endswith(" endp") \
+                       or txt.find("END OF FUNCTION") > -1:
                         ea = ea + ItemSize(ea)
                     
                     if ea < end_ea:
@@ -1416,6 +1417,7 @@ class CMyNav:
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Show advanced options", "Alt+F6", 0, self.showAdvanced, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Show trace session", "Ctrl+Alt+F6", 0, self.showTraceSession, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Show session", "Alt+F6", 0, self.showSessionsGraph, ())
+        idaapi.add_menu_item("Edit/Plugins/", "MyNav: Show browser", "Ctrl+Shift+B", 0, self.showBrowser, ())
         idaapi.add_menu_item("Edit/Plugins/", "-", None, 0, self.doNothing, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Configure CPU Recording", None, 0, self.configureSaveCPU, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Configure timeout", None, 0, self.configureTimeout, ())
@@ -1423,9 +1425,6 @@ class CMyNav:
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Trace this function", "", 0, self.traceInFunction, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Trace in session", "Ctrl+Alt+F5", 0, self.traceInSession, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: New session", "Alt+F5", 0, self.newSession, ())
-        idaapi.add_menu_item("Edit/Plugins/", "-", None, 0, self.doNothing, ())
-        idaapi.add_menu_item("Edit/Plugins/", "MyNav: Browse function (show APIs)", "Ctrl+Alt+Shift+B", 0, self.showBrowser2, ())
-        idaapi.add_menu_item("Edit/Plugins/", "MyNav: Browse function", "Ctrl+Shift+B", 0, self.showBrowser, ())
         idaapi.add_menu_item("Edit/Plugins/", "-", None, 0, self.doNothing, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Run a python script", None, 0, self.runScript, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Advanced utilities", None, 0, self.searchAdvanced, ())

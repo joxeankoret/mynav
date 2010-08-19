@@ -71,8 +71,12 @@ def GetDataXrefString(ea):
                 refs = list(idautils.DataRefsFrom(head))
                 for ref in refs:
                     s = idc.GetString(ref, -1, idc.ASCSTR_C)
+                    if not s or len(s) <= 4:
+                        s = idc.GetString(ref, -1, idc.ASCSTR_UNICODE)
+                    
                     if s:
-                        ret.append(repr(s))
+                        if len(s) > 4:
+                            ret.append(repr(s))
 
     if len(ret) > 0:
         return "\n\n" + "\n".join(ret)
@@ -303,6 +307,8 @@ class FunctionsBrowser(GraphViewer):
         self.old_father = False
         self.show_runtime_functions = True
         self.show_string = True
+        self.commands = {}
+        self.hidden = []
 
     def addChildNodes(self, father):
         self.addRequiredNodes(father, 0)
@@ -344,13 +350,16 @@ class FunctionsBrowser(GraphViewer):
                 
                 name = GetName(ea, True)
                 if name:
-                    name += GetDataXrefString(ea)
-                    self.nodes[ea] = self.AddNode((ea, name))
+                    if self.show_string:
+                        name += GetDataXrefString(ea)
                     
-                    if level < self.max_level:
-                        self.addRequiredNodes(ea, level+1)
-                    elif level == self.max_level:
-                        self.last_level.append(ea)
+                    if ea not in self.hidden:
+                        self.nodes[ea] = self.AddNode((ea, name))
+                        
+                        if level < self.max_level:
+                            self.addRequiredNodes(ea, level+1)
+                        elif level == self.max_level:
+                            self.last_level.append(ea)
 
     def OnRefresh(self):
         try:
@@ -381,6 +390,13 @@ class FunctionsBrowser(GraphViewer):
             return (label, color)
         else:
             return label
+    
+    def OnHint(self, node_id):
+        x = self.OnGetText(node_id)
+        if len(x) == 2:
+            return x[0]
+        else:
+            return x
 
     def OnDblClick(self, node_id):
         ea, label = self[node_id]
@@ -400,6 +416,75 @@ class FunctionsBrowser(GraphViewer):
         return True
 
     def OnSelect(self, node_id):
+        return True
+
+    def Show(self):
+        if not GraphViewer.Show(self):
+            return False
+        
+        cmd = self.AddCommand("Show/hide node", "Ctrl+H")
+        self.commands[cmd] = "hide"
+        cmd = self.AddCommand("Show/hide strings", "")
+        self.commands[cmd] = "strings"
+        cmd = self.AddCommand("Show/hide API calls", "")
+        self.commands[cmd] = "apis"
+        cmd = self.AddCommand("Show all nodes", "Ctrl+A")
+        self.commands[cmd] = "unhide"
+        cmd = self.AddCommand("Select recursion level", "")
+        self.commands[cmd] = "recursion"
+        cmd = self.AddCommand("-", "")
+        self.commands[cmd] = "-"
+        
+        return True
+
+    def OnCommand(self, cmd_id):
+        try:
+            cmd = self.commands[cmd_id]
+            if cmd == "hide":
+                l = {}
+                i = 0
+                for x in self.nodes:
+                    name = idc.GetFunctionName(int(x))
+                    if name and name != "":
+                        l[i] = name
+                        i += 1
+                for x in self.hidden:
+                    name = idc.GetFunctionName(int(x))
+                    if name and name != "":
+                        l[i] = name
+                        i += 1
+                
+                chooser = idaapi.Choose([], "Show/Hide functions", 3)
+                chooser.width = 50
+                chooser.list = l
+                c = chooser.choose()
+                
+                if c:
+                    c = c - 1
+                    c = idc.LocByName(l[c])
+                    
+                    if c in self.hidden:
+                        self.hidden.remove(c)
+                    else:
+                        self.hidden.append(c)
+                    self.Refresh()
+            elif cmd == "unhide":
+                self.hidden = []
+                self.Refresh()
+            elif cmd == "strings":
+                self.show_string = not self.show_string
+                self.Refresh()
+            elif cmd == "apis":
+                self.show_runtime_functions = not self.show_runtime_functions
+                self.Refresh()
+            elif cmd == "recursion":
+                num = idc.AskLong(self.max_level, "Maximum recursion level")
+                if num:
+                    self.max_level = num
+                    self.Refresh()
+        except:
+            print "OnCommand:", sys.exc_info()[1]
+        
         return True
 
 class PathsBrowser(GraphViewer):
