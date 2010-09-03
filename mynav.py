@@ -27,8 +27,6 @@ import time
 import random
 import sqlite3
 
-from Tkinter import *
-
 from idc import (GetBptQty, GetBptEA, GetRegValue, FindText, NextAddr, GetDisasm, GetMnem,
                  GetFunctionName, MakeFunction, ItemSize, GetBptAttr, AskFile, StopDebugger)
 from idaapi import (GraphViewer, dbg_can_query, askyn_c, asklong, FlowChart, get_func, info,
@@ -124,6 +122,39 @@ class CMyNav:
     def _createSchema(self):
         """ Try to create the schema or silently exit if some error ocurred. """
         try:
+            sql = """CREATE TABLE NODES (
+                            NODE_ID INTEGER PRIMARY KEY,
+                            FUNC_ADDR VARCHAR(50),
+                            STATUS INTEGER)"""
+            cur = self.db.cursor()
+            cur.execute(sql)
+        except:
+            pass
+        
+        try:
+            sql = """CREATE TABLE GRAPHS (
+                            GRAPH_ID INTEGER PRIMARY KEY,
+                            NAME VARCHAR(50),
+                            SHOW_STRINGS INTEGER,
+                            SHOW_APIS INTEGER,
+                            RECURSION_LEVEL INTEGER,
+                            FATHER VARCHAR(50))"""
+            cur = self.db.cursor()
+            cur.execute(sql)
+        except:
+            pass
+        
+        try:
+            sql = """CREATE TABLE GRAPH_NODES (
+                            GRAPH_NODES_ID INTEGER PRIMARY KEY,
+                            GRAPH_ID INTEGER,
+                            NODE_ID INTEGER)"""
+            cur = self.db.cursor()
+            cur.execute(sql)
+        except:
+            pass
+        
+        try:
             sql = """CREATE TABLE POINTS (
                             POINT_ID INTEGER PRIMARY KEY,
                             FUNC_ADDR VARCHAR(50),
@@ -216,14 +247,6 @@ class CMyNav:
 
     def saveSession(self, name, session, cpu):
         """ Save a session """
-        try:
-            root = Tk()
-            root.title("Saving session...")
-            l = Label(root, text = 0)
-            l.pack()
-        except:
-            pass
-        
         if self.step_mode:
             mtype = 1
         else:
@@ -238,14 +261,8 @@ class CMyNav:
         total = len(session)
         
         for event in session:
-            try:
-                pct = i * 100 / total
-                temp = l.cget("text")
-                temp = "Saved " + str(pct) + "%"
-                l.configure(text=temp)
-                root.update()
-            except:
-                pass
+            pct = i * 100 / total
+            temp = "Saved " + str(pct) + "%"
             
             sql = """insert into record_data (record_id, line_id, func_addr, timestamp)
                                       values (?, ?, ?, ?)"""
@@ -263,11 +280,7 @@ class CMyNav:
             i += 1
         
         self.db.commit()
-        try:
-            root.destroy()
-        except:
-            pass
-
+        
         return id
 
     def readSetting(self, setting):
@@ -772,9 +785,11 @@ class CMyNav:
             elif GetProcessState() != DSTATE_RUN:
                 if GetEventExceptionCode() != 0 and self.on_exception is not None:
                     self.on_exception(GetEventEa(), GetEventExceptionCode())
+                break
             elif code in [EXCEPTION, 0x40]:
                 #print "**EXCEPTION", hex(GetEventEa()), hex(GetEventExceptionCode())
-                self.on_exception(GetEventEa(), GetEventExceptionCode())
+                if self.on_exception is not None:
+                    self.on_exception(GetEventEa(), GetEventExceptionCode())
             elif code not in [DBG_TIMEOUT, PROCESS_START, PROCESS_EXIT, THREAD_START,
                               THREAD_EXIT, LIBRARY_LOAD, LIBRARY_UNLOAD, PROCESS_ATTACH,
                               PROCESS_DETACH, STEP]:
@@ -848,7 +863,6 @@ class CMyNav:
             id = None
             if len(self.current_session) > 0:
                 id = self.saveCurrentSession(name)
-                
                 if not self.step_mode and do_show:
                     if len(self.current_session) > 100:
                         if askyn_c(1, "There are %d node(s), it will take a long while to show the graph. Do you want to show it?" % len(self.current_session)) == 1:
@@ -985,11 +999,88 @@ class CMyNav:
     def doNothing(self):
         pass
 
+    def getGraphList(self):
+        cur = self.db.cursor()
+        sql = """select graph_id || ':' || name from graphs"""
+        cur.execute(sql)
+        
+        l = []
+        for row in cur.fetchall():
+            l.append(row[0])
+        cur.close()
+        
+        return l
+
+    def showSavedGraphs(self):
+        l = self.getGraphList()
+        chooser = Choose([], "Active Sessions", 3)
+        chooser.width = 50
+        chooser.list = l
+        c = chooser.choose()
+        
+        if c > 0:
+            c = l[c-1].split(":")[0]
+        else:
+            c = None
+        
+        return c
+
     def showBrowser(self):
-        mybrowser.ShowFunctionsBrowser()
+        mybrowser.ShowFunctionsBrowser(mynav=self)
+    
+    def loadSavedGraphNodes(self, graph_id):
+        cur = self.db.cursor()
+        sql = """ select func_addr, status
+                    from graph_nodes gn,
+                         graphs g,
+                         nodes n
+                   where gn.graph_nodes_id = g.graph_id
+                     and gn.node_id = n.node_id
+                     and g.graph_id = ?"""
+        cur.execute(sql, (graph_id, ))
+        n = []
+        h = []
+        for row in cur.fetchall():
+            if int(row[1]) == 1:
+                n.append(int(row[0]))
+            else:
+                h.append(int(row[0]))
+        cur.close()
+        
+        return n, h
+
+    def saveGraph(self, father, max_level, show_runtime_functions, show_string, hidden, result):
+        pass
+
+    def loadSavedGraphData(self, graph_id):
+        cur = self.db.cursor()
+        sql = """ select name, father, recursion_level, show_strings, show_apis
+                    from graphs
+                   where graph_id = ? """
+        cur.execute(sql, (graph_id,))
+        ea = level = strings = runtime = None
+        for row in cur.fetchall():
+            name = row[0]
+            ea = int(row[1])
+            level = int(row[2])
+            strings = int(row[3]) == 1
+            runtime = int(row[4]) == 1
+        cur.close()
+        
+        return name, ea, level, strings, runtime
+
+    def loadSavedGraph(self, graph_id):
+        nodes, hidden = self.loadSavedGraphNodes(graph_id)
+        name, ea, level, strings, runtime = self.loadSavedGraphData(graph_id)
+        mybrowser.ShowGraph(name, ea, nodes, hidden, level, strings, runtime, self)
+
+    def openSavedGraph(self):
+        g = self.showSavedGraphs()
+        if g:
+            self.loadSavedGraph(g)
 
     def showBrowser2(self):
-        mybrowser.ShowFunctionsBrowser(show_runtime=True)
+        mybrowser.ShowFunctionsBrowser(show_runtime=True, mynav=self)
 
     def traceFromThisFunction(self):
         self.preserveBreakpoints()
@@ -1130,7 +1221,6 @@ class CMyNav:
     def doDiscoverFunctions(self):
         ea = ScreenEA()
         old_ea = ea
-        jumped = False
         start_ea = SegStart(ea)
         #print "Start at 0x%08x" % start_ea
         end_ea = SegEnd(ea)
@@ -1144,7 +1234,7 @@ class CMyNav:
             val = min(1000, end_ea - ea)
             ea = FindText(tmp, SEARCH_REGEX|SEARCH_DOWN, val, 0, "# End of| endp|align |END OF FUNCTION")
             
-            if time.time() - t > 10:
+            if time.time() - t > 60:
                 val = askyn_c(1, "The process is taking too long. Do you want to continue?")
                 if val is None:
                     return False
@@ -1166,13 +1256,8 @@ class CMyNav:
                         if GetMnem(ea) != "" and GetFunctionName(ea) == "":
                             mynav_print("Creating function at 0x%08x" % ea)
                             MakeFunction(ea, BADADDR)
-                            Jump(ea)
-                            jumped = True
             else:
                 break
-        
-        if jumped:
-            Jump(old_ea)
         return True
 
     def realDoDiscoverFunctions(self):
@@ -1425,6 +1510,8 @@ class CMyNav:
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Trace this function", "", 0, self.traceInFunction, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Trace in session", "Ctrl+Alt+F5", 0, self.traceInSession, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: New session", "Alt+F5", 0, self.newSession, ())
+        #idaapi.add_menu_item("Edit/Plugins/", "-", None, 0, self.doNothing, ())
+        #idaapi.add_menu_item("Edit/Plugins/", "MyNav: Open graph", None, 0, self.openSavedGraph, ())
         idaapi.add_menu_item("Edit/Plugins/", "-", None, 0, self.doNothing, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Run a python script", None, 0, self.runScript, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Advanced utilities", None, 0, self.searchAdvanced, ())

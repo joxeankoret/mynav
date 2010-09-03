@@ -309,6 +309,7 @@ class FunctionsBrowser(GraphViewer):
         self.show_string = True
         self.commands = {}
         self.hidden = []
+        self.mynav = None
 
     def addChildNodes(self, father):
         self.addRequiredNodes(father, 0)
@@ -421,7 +422,17 @@ class FunctionsBrowser(GraphViewer):
     def Show(self):
         if not GraphViewer.Show(self):
             return False
-        
+        """
+        if self.mynav is not None and False:
+            cmd = self.AddCommand("Open graph", "Ctrl+O")
+            self.commands[cmd] = "open"
+            cmd = self.AddCommand("Save graph", "Ctrl+O")
+            self.commands[cmd] = "save"
+            cmd = self.AddCommand("-", "")
+            self.commands[cmd] = "-"
+        """
+        cmd = self.AddCommand("Refresh", "")
+        self.commands[cmd] = "refresh"
         cmd = self.AddCommand("Show/hide node", "Ctrl+H")
         self.commands[cmd] = "hide"
         cmd = self.AddCommand("Show/hide strings", "")
@@ -432,7 +443,7 @@ class FunctionsBrowser(GraphViewer):
         self.commands[cmd] = "unhide"
         cmd = self.AddCommand("Select recursion level", "")
         self.commands[cmd] = "recursion"
-        cmd = self.AddCommand("-", "")
+        cmd = self.AddCommand("- ", "")
         self.commands[cmd] = "-"
         
         return True
@@ -440,7 +451,9 @@ class FunctionsBrowser(GraphViewer):
     def OnCommand(self, cmd_id):
         try:
             cmd = self.commands[cmd_id]
-            if cmd == "hide":
+            if cmd == "refresh":
+                self.Refresh()
+            elif cmd == "hide":
                 l = {}
                 i = 0
                 for x in self.nodes:
@@ -482,6 +495,22 @@ class FunctionsBrowser(GraphViewer):
                 if num:
                     self.max_level = num
                     self.Refresh()
+            elif cmd == "open":
+                g = self.mynav.showSavedGraphs()
+                if g:
+                    nodes, hidden = self.mynav.loadSavedGraphNodes(g)
+                    name, ea, level, strings, runtime = self.mynav.loadSavedGraphData(g)
+                    self.title = name
+                    self.father = ea
+                    self.max_level = level
+                    self.show_runtime_functions = runtime
+                    self.show_string = strings
+                    self.hidden = hidden
+                    self.result = nodes
+                    self.Refresh()
+            elif cmd == "save":
+                self.mynav.saveGraph(self.father, self.max_level, self.show_runtime_functions, \
+                                     self.show_string, self.hidden, self.result)
         except:
             print "OnCommand:", sys.exc_info()[1]
         
@@ -667,7 +696,7 @@ def ShowStringsGraph(l):
     g = StringsBrowser("Strings browser", l)
     g.Show()
 
-def ShowFunctionsBrowser(mea=None, show_runtime=False, show_string=True):
+def ShowFunctionsBrowser(mea=None, show_runtime=False, show_string=True, mynav=None):
     try:
         if mea is None:
             ea = idc.ScreenEA()
@@ -683,9 +712,19 @@ def ShowFunctionsBrowser(mea=None, show_runtime=False, show_string=True):
         g.max_level = num
         g.show_string = True
         g.show_runtime_functions = show_runtime
+        g.mynav = mynav
         g.Show()
     except:
         print "Error", sys.exc_info()[1]
+
+def ShowGraph(name, ea, funcs, hidden, level, strings, runtime, mynav):
+    g = FunctionsBrowser("Saved graph: %s" % name, ea, funcs)
+    g.hidden = hidden
+    g.max_level = level
+    g.show_string = strings
+    g.show_runtime = runtime
+    g.mynav = mynav
+    g.Show()
 
 def SearchCodePath(start_ea, target_ea, extended = False):
     nodes = []
