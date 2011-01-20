@@ -104,10 +104,11 @@ class CFunctionsMatcher(object):
                     from functions
                    where nodes = ?
                      and edges = ?
-                     and points = ?
-                     and size = ?
+                     and points = ? 
+                     and size > 200 """
+        """             and size = ?
                      and instructions = ? """
-        cur.execute(sql, (nodes, edges, points, size, instructions))
+        cur.execute(sql, (nodes, edges, points))#, size, instructions))
         
         res = None
         for row in cur.fetchall():

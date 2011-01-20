@@ -32,6 +32,14 @@ import idautils
 
 from idaapi import GraphViewer, Choose2
 
+def isFuncLib(ea):
+    if idc.GetFunctionFlags(ea) & idc.FUNC_LIB:
+        return True
+    elif GetName(ea).startswith("."):
+        return True
+    else:
+        return False
+
 def GetCodeRefsFrom(ea):
     name = idc.GetFunctionName(ea)
     ea = idc.LocByName(name)
@@ -346,7 +354,7 @@ class FunctionsBrowser(GraphViewer):
         for ea in GetCodeRefsFrom(father):
             ea = GetFunctionStartEA(ea)
             if not self.nodes.has_key(ea):
-                if idc.GetFunctionFlags(ea) & idc.FUNC_LIB and not self.show_runtime_functions:
+                if isFuncLib(ea) and not self.show_runtime_functions:
                     continue
                 
                 name = GetName(ea, True)
@@ -386,7 +394,7 @@ class FunctionsBrowser(GraphViewer):
         elif node_id == 0:
             color = 0x00f000
             return (label, color)
-        elif flags & idc.FUNC_LIB or flags == -1:
+        elif flags & idc.FUNC_LIB or flags == -1 or label.startswith("."):
             color = 0xf000f0
             return (label, color)
         else:
@@ -576,7 +584,7 @@ class PathsBrowser(GraphViewer):
             if ea in self.start or ea in self.target or ea in self.hits:
                 color = 0x00f000
                 return (label, color)
-            elif flags & idc.FUNC_LIB or flags == -1:
+            elif flags & idc.FUNC_LIB or flags == -1 or label.startswith("."):
                 color = 0xf000f0
                 return (label, color)
             else:

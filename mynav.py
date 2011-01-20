@@ -32,7 +32,7 @@ from idc import (GetBptQty, GetBptEA, GetRegValue, FindText, NextAddr, GetDisasm
 from idaapi import (GraphViewer, dbg_can_query, askyn_c, asklong, FlowChart, get_func, info,
                    get_dbg_byte, get_idp_name, DBG_Hooks, run_requests,
                    request_run_to)
-from idautils import GetRegisterList
+
 import mybrowser
 import myexport
 
