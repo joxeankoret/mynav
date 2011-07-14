@@ -29,11 +29,16 @@ import sqlite3
 
 from idc import (GetBptQty, GetBptEA, GetRegValue, FindText, NextAddr, GetDisasm, GetMnem,
                  GetFunctionName, MakeFunction, ItemSize, GetBptAttr, AskFile, StopDebugger)
-from idaapi import (GraphViewer, dbg_can_query, askyn_c, asklong, FlowChart, get_func, info,
-                   get_dbg_byte, get_idp_name, DBG_Hooks, run_requests,
-                   request_run_to)
+from idaapi import (askyn_c, asklong, get_func, info, get_dbg_byte, get_idp_name,
+                    DBG_Hooks, run_requests, request_run_to, showAuto, find_not_func)
 
-import mybrowser
+try:
+    from idaapi import GraphViewer
+    import mybrowser
+    hasGraphViewer = True
+except ImportError:
+    hasGraphViewer = False
+
 import myexport
 
 APPLICATION_NAME = "MyNav"
@@ -235,8 +240,16 @@ class CMyNav:
 
     def _loadDatabase(self):
         """ Connect to the SQLite database and create the schema if needed """
-        self.filename = "%s.sqlite" % GetInputFilePath()
-        self.db = sqlite3.connect(self.filename)
+        
+        try:
+            self.filename = "%s.sqlite" % GetInputFilePath()
+            self.db = sqlite3.connect(self.filename, check_same_thread=False, isolation_level=None)
+        except:
+            self.filename = idc.AskFile(1, "*.sqlite", "Select an existing or new SQLite database")
+            
+            if self.filename is not None:
+                self.db = sqlite3.connect(self.filename, check_same_thread=False, isolation_level=None)
+        
         self.db.text_factory = str
         self._createSchema()
 
@@ -632,6 +645,9 @@ class CMyNav:
 
     def showGraph(self, id=None, name=None):
         """ Show a graph for one specific recorded session """
+        if not hasGraphViewer:
+            print "No GraphViewer support :("
+            return
         
         if id is not None:
             if not self.loadSession(id):
@@ -653,6 +669,7 @@ class CMyNav:
         
         DelBpt(int(f))
         AddBpt(int(f))
+        EnableBpt(int(f),1)
         
         if not save_cpu:
             SetBptAttr(f, BPTATTR_FLAGS, BPT_TRACE)
@@ -1232,8 +1249,10 @@ class CMyNav:
         while ea != BADADDR and ea < end_ea:
             tmp = ea
             val = min(1000, end_ea - ea)
+            #ea = find_not_func(tmp, 0)
+            #if ea == BADADDR:
             ea = FindText(tmp, SEARCH_REGEX|SEARCH_DOWN, val, 0, "# End of| endp|align |END OF FUNCTION")
-            
+            showAuto(ea)
             if time.time() - t > 60:
                 val = askyn_c(1, "The process is taking too long. Do you want to continue?")
                 if val is None:
@@ -1244,6 +1263,7 @@ class CMyNav:
                     t = time.time()
             
             if ea != BADADDR and ea < end_ea:
+                showAuto(ea)
                 ea += ItemSize(ea)
                 if ea != BADADDR and ea < end_ea:
                     txt = GetDisasm(ea)
@@ -1517,6 +1537,7 @@ class CMyNav:
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Advanced utilities", None, 0, self.searchAdvanced, ())
 
 def main():
+    idaapi.set_script_timeout(0)
     nav = CMyNav()
     """
     if askyn_c(1, "Set breakpoints?") == 1:

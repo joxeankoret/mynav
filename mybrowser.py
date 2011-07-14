@@ -30,7 +30,11 @@ import idc
 import idaapi
 import idautils
 
-from idaapi import GraphViewer, Choose2
+try:
+    from idaapi import GraphViewer, Choose2
+    hasGraphViewer = True
+except ImportError:
+    hasGraphViewer = False
 
 def isFuncLib(ea):
     if idc.GetFunctionFlags(ea) & idc.FUNC_LIB:
@@ -110,7 +114,7 @@ class UnsafeFunctionsChoose2(Choose2):
         def __init__(self, item):
             self.ea        = item['xref']
             self.vfname    = item['func_name']
-
+        
         def __str__(self):
             return '%08x' % self.ea
 
