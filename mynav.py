@@ -669,10 +669,11 @@ class CMyNav:
         
         DelBpt(int(f))
         AddBpt(int(f))
-        EnableBpt(int(f),1)
         
         if not save_cpu:
             SetBptAttr(f, BPTATTR_FLAGS, BPT_TRACE)
+        
+        EnableBpt(int(f),1)
 
     def setBreakpoints(self, trace=True):
         """ Set a breakpoint in every function """
