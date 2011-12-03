@@ -24,7 +24,11 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 # ------------------------------------------------
 # Standard imports
 import sys
-import sqlite3
+try:
+    import sqlite3
+    hasSqlite = True
+except ImportError:
+    hasSqlite = False
 
 # ------------------------------------------------
 # IDA's imports

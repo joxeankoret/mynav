@@ -25,12 +25,18 @@ import os
 import sys
 import time
 import random
-import sqlite3
+try:
+    import sqlite3
+    hasSqlite = True
+except ImportError:
+    hasSqlite = False
+    print "Warning! Your python version lacks SQLite support!"
 
 from idc import (GetBptQty, GetBptEA, GetRegValue, FindText, NextAddr, GetDisasm, GetMnem,
                  GetFunctionName, MakeFunction, ItemSize, GetBptAttr, AskFile, StopDebugger)
 from idaapi import (askyn_c, asklong, get_func, info, get_dbg_byte, get_idp_name,
-                    DBG_Hooks, run_requests, request_run_to, showAuto, find_not_func)
+                    DBG_Hooks, run_requests, request_run_to, showAuto, find_not_func,
+                    get_func, msg)
 
 try:
     from idaapi import GraphViewer
@@ -48,8 +54,8 @@ COLORS = [0xfff000, 0x95AFCD, 0x4FFF4F, 0xc0ffff, 0xffffc0, 0xc0cfff, 0xc0ffcf, 
 
 reload(sys)
 sys.setdefaultencoding('utf8')
-def mynav_print(msg):
-    print "[%s] %s" % (APPLICATION_NAME, msg)
+def mynav_print(amsg):
+    msg("[%s] %s\n" % (APPLICATION_NAME, amsg))
 
 class FunctionsGraph(GraphViewer):
     def __init__(self, title, session):
@@ -118,7 +124,8 @@ class CMyNav:
         self.dbg_directory = ""
         self.on_exception = None
         
-        self._loadDatabase()
+        if hasSqlite:
+            self._loadDatabase()
 
     def __del__(self):
         if self.db is not None:
@@ -1246,7 +1253,8 @@ class CMyNav:
         #ea2 = MaxEA()
         t = time.time()
         val = 1000
-        
+
+        asked = False
         while ea != BADADDR and ea < end_ea:
             tmp = ea
             val = min(1000, end_ea - ea)
@@ -1254,8 +1262,9 @@ class CMyNav:
             #if ea == BADADDR:
             ea = FindText(tmp, SEARCH_REGEX|SEARCH_DOWN, val, 0, "# End of| endp|align |END OF FUNCTION")
             showAuto(ea)
-            if time.time() - t > 60:
+            if time.time() - t > 60 and not asked:
                 val = askyn_c(1, "The process is taking too long. Do you want to continue?")
+                asked = True
                 if val is None:
                     return False
                 elif val != 1:
@@ -1266,6 +1275,7 @@ class CMyNav:
             if ea != BADADDR and ea < end_ea:
                 showAuto(ea)
                 ea += ItemSize(ea)
+                
                 if ea != BADADDR and ea < end_ea:
                     txt = GetDisasm(ea)
                     
@@ -1274,8 +1284,9 @@ class CMyNav:
                         ea = ea + ItemSize(ea)
                     
                     if ea < end_ea:
-                        if GetMnem(ea) != "" and GetFunctionName(ea) == "":
+                        if GetFunctionName(ea) == "":
                             mynav_print("Creating function at 0x%08x" % ea)
+                            MakeCode(ea)
                             MakeFunction(ea, BADADDR)
             else:
                 break
@@ -1498,13 +1509,15 @@ class CMyNav:
         #idaapi.add_menu_item("Edit/Plugins/", "MyNav: Trace code paths between 2 functions", None, 0, self.traceCodePaths, None)
         #idaapi.add_menu_item("Edit/Plugins/", "-", None, 0, self.doNothing, None)
         idaapi.add_menu_item("Edit/Plugins/", "-", None, 0, self.doNothing, ())
-        idaapi.add_menu_item("Edit/Plugins/", "MyNav: Delete ALL sessions", "", 0, self.clearSessions, ())
-        idaapi.add_menu_item("Edit/Plugins/", "MyNav: Delete a session", "", 0, self.deleteSession, ())
-        idaapi.add_menu_item("Edit/Plugins/", "-", None, 0, self.doNothing, ())
+        if hasSqlite:
+            idaapi.add_menu_item("Edit/Plugins/", "MyNav: Delete ALL sessions", "", 0, self.clearSessions, ())
+            idaapi.add_menu_item("Edit/Plugins/", "MyNav: Delete a session", "", 0, self.deleteSession, ())
+            idaapi.add_menu_item("Edit/Plugins/", "-", None, 0, self.doNothing, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Advanced deselection options", "", 0, self.deselectAdvanced, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Advanced selection options", "", 0, self.selectAdvanced, ())
-        idaapi.add_menu_item("Edit/Plugins/", "MyNav: Deselect hits from session", "Ctrl+Shift+Alt+F9", 0, self.loadBreakpointsFromSessionInverse, ())
-        idaapi.add_menu_item("Edit/Plugins/", "MyNav: Select hits from session", "Ctrl+Alt+F9", 0, self.loadBreakpointsFromSession, ())
+	if hasSqlite:
+            idaapi.add_menu_item("Edit/Plugins/", "MyNav: Deselect hits from session", "Ctrl+Shift+Alt+F9", 0, self.loadBreakpointsFromSessionInverse, ())
+            idaapi.add_menu_item("Edit/Plugins/", "MyNav: Select hits from session", "Ctrl+Alt+F9", 0, self.loadBreakpointsFromSession, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Clear all breakpoints", "", 0, self.clearBreakpoints, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Set all breakpoints", "Alt+F9", 0, self.setBreakpoints, ())
         idaapi.add_menu_item("Edit/Plugins/", "-", None, 0, self.doNothing, ())
@@ -1514,26 +1527,28 @@ class CMyNav:
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Add target point", None, 0, self.addCurrentAsTargetPoint, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Add entry point", None, 0, self.addCurrentAsDataEntryPoint, ())
         """
-        idaapi.add_menu_item("Edit/Plugins/", "MyNav: Add/Remove target point", None, 0, self.addRemoveTargetPoint, ())
-        idaapi.add_menu_item("Edit/Plugins/", "MyNav: Add/Remove entry point", None, 0, self.addRemoveEntryPoint, ())
-        idaapi.add_menu_item("Edit/Plugins/", "-", None, 0, self.doNothing, ())
-        idaapi.add_menu_item("Edit/Plugins/", "MyNav: Clear trace session", "", 0, self.clearTraceSession, ())
-        idaapi.add_menu_item("Edit/Plugins/", "MyNav: Session's functions List", "", 0, self.showSessionsFunctions, ())
-        #idaapi.add_menu_item("Edit/Plugins/", "MyNav: Show session's manager", "", 0, self.showSessionsManager, ())
-        idaapi.add_menu_item("Edit/Plugins/", "MyNav: Show advanced options", "Alt+F6", 0, self.showAdvanced, ())
-        idaapi.add_menu_item("Edit/Plugins/", "MyNav: Show trace session", "Ctrl+Alt+F6", 0, self.showTraceSession, ())
-        idaapi.add_menu_item("Edit/Plugins/", "MyNav: Show session", "Alt+F6", 0, self.showSessionsGraph, ())
+        if hasSqlite:
+            idaapi.add_menu_item("Edit/Plugins/", "MyNav: Add/Remove target point", None, 0, self.addRemoveTargetPoint, ())
+            idaapi.add_menu_item("Edit/Plugins/", "MyNav: Add/Remove entry point", None, 0, self.addRemoveEntryPoint, ())
+            idaapi.add_menu_item("Edit/Plugins/", "-", None, 0, self.doNothing, ())
+            idaapi.add_menu_item("Edit/Plugins/", "MyNav: Clear trace session", "", 0, self.clearTraceSession, ())
+            idaapi.add_menu_item("Edit/Plugins/", "MyNav: Session's functions List", "", 0, self.showSessionsFunctions, ())
+            #idaapi.add_menu_item("Edit/Plugins/", "MyNav: Show session's manager", "", 0, self.showSessionsManager, ())
+            idaapi.add_menu_item("Edit/Plugins/", "MyNav: Show advanced options", "Alt+F6", 0, self.showAdvanced, ())
+            idaapi.add_menu_item("Edit/Plugins/", "MyNav: Show trace session", "Ctrl+Alt+F6", 0, self.showTraceSession, ())
+            idaapi.add_menu_item("Edit/Plugins/", "MyNav: Show session", "Alt+F6", 0, self.showSessionsGraph, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Show browser", "Ctrl+Shift+B", 0, self.showBrowser, ())
         idaapi.add_menu_item("Edit/Plugins/", "-", None, 0, self.doNothing, ())
-        idaapi.add_menu_item("Edit/Plugins/", "MyNav: Configure CPU Recording", None, 0, self.configureSaveCPU, ())
-        idaapi.add_menu_item("Edit/Plugins/", "MyNav: Configure timeout", None, 0, self.configureTimeout, ())
-        idaapi.add_menu_item("Edit/Plugins/", "MyNav: New advanced session", None, 0, self.newAdvancedSession, ())
-        idaapi.add_menu_item("Edit/Plugins/", "MyNav: Trace this function", "", 0, self.traceInFunction, ())
-        idaapi.add_menu_item("Edit/Plugins/", "MyNav: Trace in session", "Ctrl+Alt+F5", 0, self.traceInSession, ())
-        idaapi.add_menu_item("Edit/Plugins/", "MyNav: New session", "Alt+F5", 0, self.newSession, ())
-        #idaapi.add_menu_item("Edit/Plugins/", "-", None, 0, self.doNothing, ())
-        #idaapi.add_menu_item("Edit/Plugins/", "MyNav: Open graph", None, 0, self.openSavedGraph, ())
-        idaapi.add_menu_item("Edit/Plugins/", "-", None, 0, self.doNothing, ())
+        if hasSqlite:
+            idaapi.add_menu_item("Edit/Plugins/", "MyNav: Configure CPU Recording", None, 0, self.configureSaveCPU, ())
+            idaapi.add_menu_item("Edit/Plugins/", "MyNav: Configure timeout", None, 0, self.configureTimeout, ())
+            idaapi.add_menu_item("Edit/Plugins/", "MyNav: New advanced session", None, 0, self.newAdvancedSession, ())
+            idaapi.add_menu_item("Edit/Plugins/", "MyNav: Trace this function", "", 0, self.traceInFunction, ())
+            idaapi.add_menu_item("Edit/Plugins/", "MyNav: Trace in session", "Ctrl+Alt+F5", 0, self.traceInSession, ())
+            idaapi.add_menu_item("Edit/Plugins/", "MyNav: New session", "Alt+F5", 0, self.newSession, ())
+            #idaapi.add_menu_item("Edit/Plugins/", "-", None, 0, self.doNothing, ())
+            #idaapi.add_menu_item("Edit/Plugins/", "MyNav: Open graph", None, 0, self.openSavedGraph, ())
+            idaapi.add_menu_item("Edit/Plugins/", "-", None, 0, self.doNothing, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Run a python script", None, 0, self.runScript, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Advanced utilities", None, 0, self.searchAdvanced, ())
 
