@@ -639,7 +639,6 @@ class CMyNav:
         cur.execute(sql, (int(id), ))
         self.current_name = cur.fetchone()[0]
         self.default_name = "Trace: " + str(self.current_name)
-        cur.close()
         
         sql = "select func_addr, timestamp from record_data where record_id = ?"
         cur.execute(sql, (int(id), ))
@@ -1515,7 +1514,8 @@ class CMyNav:
             idaapi.add_menu_item("Edit/Plugins/", "-", None, 0, self.doNothing, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Advanced deselection options", "", 0, self.deselectAdvanced, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Advanced selection options", "", 0, self.selectAdvanced, ())
-	if hasSqlite:
+
+        if hasSqlite:
             idaapi.add_menu_item("Edit/Plugins/", "MyNav: Deselect hits from session", "Ctrl+Shift+Alt+F9", 0, self.loadBreakpointsFromSessionInverse, ())
             idaapi.add_menu_item("Edit/Plugins/", "MyNav: Select hits from session", "Ctrl+Alt+F9", 0, self.loadBreakpointsFromSession, ())
         idaapi.add_menu_item("Edit/Plugins/", "MyNav: Clear all breakpoints", "", 0, self.clearBreakpoints, ())

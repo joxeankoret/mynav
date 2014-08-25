@@ -24,6 +24,8 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 # ------------------------------------------------
 # Standard imports
 import sys
+import traceback
+
 try:
     import sqlite3
     hasSqlite = True
@@ -73,7 +75,8 @@ class CFunctionsMatcher(object):
                         points integer,
                         size integer,
                         instructions integer,
-                        mnemonics text) """
+                        mnemonics text,
+                        prototype text) """
         cur.execute(sql)
         self.db.commit()
         cur.close()
@@ -89,19 +92,19 @@ class CFunctionsMatcher(object):
 
     def saveDatabase(self):
         cur = self.db.cursor()
-        sql = """insert into functions (name, processor, nodes, edges, points, size, instructions, mnemonics)
-                                values (?, ?, ?, ?, ?, ?, ?, ?)"""
+        sql = """insert into functions (name, processor, nodes, edges, points, size, instructions, mnemonics, prototype)
+                                values (?, ?, ?, ?, ?, ?, ?, ?, ?)"""
         
         for row in self.functions:
-            name, nodes, edges, points, size, instructions, mnems = self.functions[row]
-            cur.execute(sql, (name, idaapi.get_idp_name(), nodes, edges, points, size, instructions, str(mnems)))
+            name, nodes, edges, points, size, instructions, mnems, prototype = self.functions[row]
+            cur.execute(sql, (name, idaapi.get_idp_name(), nodes, edges, points, size, instructions, str(mnems), prototype))
         
         self.db.commit()
         cur.close()
         return True
 
     def search(self, f):
-        name, nodes, edges, points, size, instructions, mnems = f
+        name, nodes, edges, points, size, instructions, mnems, prototype = f
         
         cur = self.db.cursor()
         sql = """ select name
@@ -123,10 +126,10 @@ class CFunctionsMatcher(object):
         return res
 
     def searchExact(self, f):
-        name, nodes, edges, points, size, instructions, mnems = f
+        name, nodes, edges, points, size, instructions, mnems, prototype = f
         
         cur = self.db.cursor()
-        sql = """ select name
+        sql = """ select name, prototype
                     from functions
                    where processor = ?
                      and nodes = ?
@@ -139,11 +142,21 @@ class CFunctionsMatcher(object):
         
         res = None
         for row in cur.fetchall():
-            res = row[0]
+            res = row[0], row[1]
         
         cur.close()
         
         return res
+
+    def makeName(self, f, match):
+        if idc.MakeNameEx(int(f), str(match), idc.SN_AUTO|idc.SN_PUBLIC):
+            return True
+
+        for i in range(100):
+            if idc.MakeNameEx(int(f), str(match) + "_%d" % i, idc.SN_AUTO|idc.SN_PUBLIC):
+                return True
+        
+        return False
 
     def searchAll(self):
         if self.start_ea is not None:
@@ -155,6 +168,7 @@ class CFunctionsMatcher(object):
             name = idc.GetFunctionName(f)
             
             if not name.startswith("sub_"):
+                print "skipping %s" % name
                 continue
             
             flags = idc.GetFunctionFlags(f)
@@ -164,13 +178,31 @@ class CFunctionsMatcher(object):
             x = self.readFunction(f, False)
             
             if x:
-                match = self.searchExact(x)
+                ret = self.searchExact(x)
+                if ret:
+                    match, prototype = ret
+                else:
+                    match = None
+
                 if match:
                     print "%08x Function %s exact matches with %s" % (f, idc.GetFunctionName(f), match)
                     try:
-                        idaapi.set_name(int(f), str(match))
+                        self.makeName(int(f), str(match))
                     except:
                         print "  %08x Cannot rename function" % f
+                        print sys.exc_info()[1]
+                
+                    try:
+                        pos = prototype.find("(")
+                        if pos > -1:
+                            if prototype.find(">(") > -1:
+                                pos = prototype.find("<")
+                            prototype = str(prototype[:pos] + " x" + prototype[pos:])
+                            print repr(prototype)
+                            print "%08x Function %s's type is %s" % (f, idc.GetFunctionName(f), prototype)
+                            idc.SetType(int(f), prototype)
+                    except:
+                        print "  %08x Cannot change the type of the function (type %s)" % (f, prototype)
                         print sys.exc_info()[1]
                 else:
                     match = self.search(x)
@@ -232,14 +264,14 @@ class CFunctionsMatcher(object):
             if outdegree > 0:
                 points += outdegree
         
-        if nodes > 1 and instructions > 5 and edges > 1:
-            #myexport_print("Exporter: Current function 0x%08x %s" % (f, name))
-            return (name, nodes, edges, points, size, instructions, mnems)
+        if nodes > 1 and instructions > 0 and edges > 1:
+            myexport_print("Exporter: Current function 0x%08x %s" % (f, name))
+            return (name, nodes, edges, points, size, instructions, mnems, idc.GetType(f))
         
         return False
 
     def getFunctions(self):
-        for f in idautils.Functions():
+        for f in list(idautils.Functions()):
             x = self.readFunction(f)
             if x:
                 self.functions[f] = x
@@ -272,18 +304,23 @@ class CFunctionsMatcher(object):
             f = filename
         
         if f:
+            print "file is", f
             self.openDatabase(f)
             self.searchAll()
 
 # ------------------------------------------------
 # Only called when accesed directly
 def main():
-    exporter = CFunctionsMatcher()
-    #exporter.export()
-    exporter.start_ea = idc.SegStart(idc.ScreenEA())
-    exporter.end_ea = idc.SegEnd(idc.ScreenEA())
-    exporter.openDatabase("c:\\tools\\mynav\\pako.sqlite")
-    exporter.searchAll()
+    try:
+        res = idaapi.askyn_c(1, "Do you want to export (YES) or import (NO)?")
+        exporter = CFunctionsMatcher()
+        if res == 1:
+            exporter.export()
+        elif res == 0:
+            exporter.doImport()
+    except:
+        print "Error:", sys.exc_info()[1]
+        traceback.print_exc(file=sys.stdout)
 
 if __name__ == "__main__":
     main()
